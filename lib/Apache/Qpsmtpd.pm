@@ -1,4 +1,4 @@
-# $Id$
+# $Id: Qpsmtpd.pm 509 2005-07-15 21:13:49Z msergeant $
 
 package Apache::Qpsmtpd;
 

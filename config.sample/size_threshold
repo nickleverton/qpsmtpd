@@ -1,3 +1,0 @@
-# Messages below the size below will be stored in memory and not spooled.
-# Without this file, the default is 0 bytes, i.e. all messages will be spooled.
-10000
