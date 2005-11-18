@@ -2,7 +2,7 @@
 
 exim-bsmtp
 
-$Id$
+$Id: /qpsmtpd/tags/0.31.1/plugins/queue/exim-bsmtp 6049 2005-11-16T15:31:23.581666Z ask  $
 
 =head1 DESCRIPTION
 
