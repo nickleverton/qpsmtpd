@@ -4,7 +4,7 @@
 
 clamav -- ClamAV antivirus plugin for qpsmtpd
 
-$Id$
+$Id: clamav 615 2006-02-17 19:02:02Z ask $
 
 =head1 DESCRIPTION
 
