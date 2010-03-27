@@ -1,0 +1,135 @@
+#! perl
+
+=head1 NAME
+
+check_goodrcptto
+
+=head1 DESCRIPTION
+
+This plugin denies all recipients except those in the goodrcptto config file 
+(i.e. like badrcptto, but whitelisting). It supports recipient username 
+extension stripping, and both domain ('@domain.com') and username (bare
+'postmaster') wildcard entries in the config file.
+
+Useful where something like check_delivery is overkill or not an option
+(e.g. relays, bastion hosts).
+
+=head1 CONFIG
+
+The following parameters can be passed to check_goodrcptto:
+
+=over 4
+
+=item extn <char>
+
+If B<extn> is set, check_goodrcptto does its checks using both the username as given and 
+the username stripped of any extensions beginning with <char>.
+
+=item deny_note <name>
+
+If B<deny_note> is specified, check_goodrcptto will set a connection note
+with the given name when denying a recipient. If <name> is of the form
+'name=value', then the specified value will be used instead of the default
+'1'. If the connection note already exists, the value will be incremented
+(if numeric), instead of set.  If no note is specified, check_goodrcptto
+will use a note named 'check_goodrcptto'.
+
+=item limit <number>
+
+If B<limit> is specified, clients will be disconnected when they reach
+that number of bad addresses.
+
+=back
+
+=head1 AUTHOR
+
+Gavin Carr <gavin@openfusion.com.au>.
+
+This plugin is free software; you can distribute it and/or modify it
+under the terms of the Perl Artistic Licence.
+
+=cut
+
+my $VERSION = 0.03_90;
+
+use constant PLUGIN => 'check_goodrcptto';
+
+sub register {
+  my ($self, $qp, %arg) = @_;
+  if (exists $arg{extn}) {
+    $self->{_extn} = $arg{extn};
+    $self->log(LOGINFO, "Checking local usernames for '$self->{_extn}' extensions");
+  }
+  if (exists $arg{deny_note}) {
+    $self->{_deny_note} = $arg{deny_note};
+  } else {
+    $self->{_deny_note} = "_".PLUGIN;
+  }
+  if (exists $arg{limit}) {
+	  $self->log(LOGINFO, "Limiting to $arg{limit} bad user names");
+	  $self->{_bad_rcpt_max} = $arg{limit};
+  }
+#  if ($arg{goodrcpttodb}) {
+#	  $self->log(LOGDEBUG, "Reading goodrcptto from $arg{goodrcpttodb}");
+#	  $self->{_indb} = arg{goodrcpttodb};
+#  } else {
+#	  $self->{_indb} = 'config/goodrcptto.db';
+#  }
+}
+
+sub hook_rcpt {
+  my ($self, $transaction, $recipient) = @_;
+
+  return (DECLINED) if $self->qp->connection->relay_client;
+
+  my @goodrcptto = $self->qp->config("goodrcptto") or return (DECLINED);
+
+  my $host = lc $recipient->host;
+  my $user = lc $recipient->user;
+  return (DECLINED) unless $host && $user;
+  my $address = $user;
+  $address .= '@' . $host if $host;
+
+  # Setup another user and address stripped of extensions
+  my ($user2, $address2);
+  my $extn = $self->{_extn};
+  if ($extn && $user =~ m/^([^$extn]+)$extn/) {
+    $user2 = $1;
+    $address2 = $user2;
+    $address2 .= '@' . $host if $host;
+    $self->log(LOGDEBUG, "address includes extn '$extn', checking both $user and $user2");
+  }
+
+  for my $good (@goodrcptto) {
+    $good =~ s/^\s*(\S+).*/\L$1/;
+    return (DECLINED) if $good eq $address;
+    return (DECLINED) if $address2 && $good eq $address2;
+    # Allow wildcard '@domain.com' entries
+    return (DECLINED) if $good eq "\@$host";
+    # Allow wildcard bare 'username' entries e.g. 'postmaster'
+    return (DECLINED) if index($good,'@') < 0 && $good eq $user;
+    return (DECLINED) if $user2 && index($good,'@') < 0 && $good eq $user2;
+  }
+
+  $self->log(LOGWARN, "recipient $address denied");
+
+  # Set/increment the specified deny_note, if applicable
+  if ($self->{_deny_note}) {
+    my ($name, $value) = ($self->{_deny_note} =~ m/^([-\w]+)(?:=([\d.]+))?/);
+    $value ||= 1;
+    $self->qp->connection->notes($name, ($self->qp->connection->notes($name) || 0) + $value)
+      if $name;
+    $self->log(LOGDEBUG, "deny_note: $name=" . $self->qp->connection->notes($name));
+
+  # If the maximum number of bad recipients was reached, deny and disconnect,
+    if (exists $self->{_bad_rcpt_max} && $value >= $self->{_bad_rcpt_max}) {
+      $self->log(LOGNOTICE, "Too many bad recipients, disconnecting client");
+      return (DENY_DISCONNECT, "Local policy rejects this mail");
+    }
+  }
+
+  return (DENY, "Local policy rejects this mail")
+}
+
+# arch-tag: 2d2195a5-27b0-465d-a68f-f425efae2cc0
+

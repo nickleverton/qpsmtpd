@@ -16,7 +16,9 @@ to config/plugins
 it puts things into the 'p0f' connection notes so other plugins can do
 things based on source OS.
 
-All code heavily based upon the p0fq.pl included with the p0f distribution.
+All code heavily based upon the p0fq.pl included with the p0f
+distribution, which is marked as:
+ Copyright (C) 2004 by Aurelien Jacobs <aurel@gnuage.org>.
 
 =cut
 
@@ -92,8 +94,24 @@ sub hook_connect {
   };
 
   $self->qp->connection->notes('p0f', $p0f);
-  $self->log(LOGINFO, "Results: ".$p0f->{genre}." (".$p0f->{detail}.")");
+  #$self->log(LOGINFO, "Results: ".$p0f->{genre}." (".$p0f->{detail}.")");
+  $self->log(LOGINFO,sprintf("p0f plugin: genre=%s detail=%s dist=%d link=%u tos=%u fw=%u nat=%u real=%u score=%d mflags=%x uptime=%d",
+	  $genre, $detail, $dist, $link, $tos, $fw, $nat, $real, $score, $mflags, $uptime) );
   $self->log(LOGERROR,"error: $@") if $@;
+
+  return DECLINED;
+}
+
+
+sub hook_data_post {
+  my($self, $transaction, $sender) = @_;
+
+  my $p0f = $self->qp->connection->notes('p0f');
+  return DECLINED unless defined $p0f;
+
+  $transaction->header->add('X-OS-Fingerprint', $p0f->{genre}." ".$p0f->{detail}.
+                          (defined $p0f->{uptime} ? " (up ".$p0f->{uptime}.")" : "").
+			  " (distance ".$p0f->{distance}.", link ".$p0f->{link} .")", 0);
 
   return DECLINED;
 }

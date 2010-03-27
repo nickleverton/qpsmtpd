@@ -19,13 +19,26 @@ per line.
 sub hook_helo {
   my ($self, $transaction, $host) = @_;
   ($host = lc $host) or return DECLINED;
-  
+
+  # Some stupid MUA's (hello, Outlook) will HELO with the domain of
+  # the user's address.  If such a client is validly relaying, allow it.
+  return DECLINED if $self->qp->connection->relay_client();
+
   for my $bad ($self->qp->config('badhelo')) {
     if ($host eq lc $bad) {
       $self->log(LOGDEBUG, "Denying HELO from host claiming to be $bad");
       return (DENY_DISCONNECT, "Sorry, I don't believe that you are $host.");
     }
   }
+
+  # Reject non-relaying hosts which claim to be us.
+  for my $bad ($self->qp->config('currentip'), $self->qp->config('me')) {
+    if ($host eq lc $bad) {
+      $self->log(LOGDEBUG, "Denying HELO $host from host claiming to be me");
+      return (DENY_DISCONNECT, "Denying HELO $host from host claiming to be me");
+    }
+  }
+
   return DECLINED;
 }
 

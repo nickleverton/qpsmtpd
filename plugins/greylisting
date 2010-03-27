@@ -204,7 +204,7 @@ sub denysoft_greylist {
   # Always allow relayclients and whitelisted hosts/senders
   return DECLINED if $self->qp->connection->relay_client();
   return DECLINED if $self->qp->connection->notes('whitelisthost');
-  return DECLINED if $transaction->notes('whitelistsender');
+  return DECLINED if $transaction->notes('goodmailfrom');
 
   if ($config->{db_dir} && $config->{db_dir} =~ m{^([-a-zA-Z0-9./_]+)$}) {
     $config->{db_dir} = $1; 

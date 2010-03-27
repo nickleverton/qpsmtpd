@@ -13,6 +13,9 @@ blocked as if the recipient (TO) didn't exist.  This is specifically designed
 to not give the impression that the sender is blocked (good for cases of
 harassment).
 
+Senders in the goodmailfrom list will be exempted from this check
+(useful if you have a domain wide badmailfrom with some good addresses).
+
 Based heavily on check_badmailfrom.
 
 =cut
@@ -35,8 +38,7 @@ sub hook_mail {
     $bad = lc $bad;
     $self->log(LOGWARN, "Bad badmailfromto config: No \@ sign in $bad") and next unless $bad =~ m/\@/;
     $transaction->notes('badmailfromto', "$bad")
-      if ($bad eq $from)
-      || (substr($bad,0,1) eq '@' && $bad eq "\@$host");
+      if ($bad eq $from || $bad eq "\@$host");
   }
   return (DECLINED);
 }
@@ -44,6 +46,7 @@ sub hook_mail {
 sub hook_rcpt {
   my ($self, $transaction, $rcpt, %param) = @_;
   my $recipient = lc($rcpt->user) . '@' . lc($rcpt->host);
+  return (DECLINED) if $transaction->notes('goodmailfrom');
   my $sender = $transaction->notes('badmailfromto');
   if ($sender) {
     my @badmailfromto = $self->qp->config("badmailfromto")

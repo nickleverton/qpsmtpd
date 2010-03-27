@@ -1,0 +1,43 @@
+#! /usr/bin/perl
+
+=head1 NAME
+
+check_goodmailfrom - exempt sender's address from blacklists.
+
+=head1 DESCRIPTION
+
+Reads the "goodmailfrom" configuration as various patches for qmail-smtpd
+do, and sets the "goodmailfrom" transaction note if the sender is found.
+This note indicates to other plugins that this sender should be exempted
+from blacklists.
+
+You may optionally include a message after the sender address (leave
+a space).  This is placed in the 'goodmailfrom' note and may be used
+by other plugins if desired.
+
+=cut
+
+sub hook_mail {
+  my ($self, $transaction, $sender, %param) = @_;
+
+  my @goodmailfrom = $self->qp->config("goodmailfrom")
+    or return (DECLINED);
+
+  return (DECLINED) unless ($sender->format ne "<>"
+                            and $sender->host && $sender->user);
+
+  my $host = lc $sender->host;
+  my $from = lc($sender->user) . '@' . $host;
+
+  for my $config (@goodmailfrom) {
+    my ($good, $reason) = $config =~ /^\s*(\S+)(?:\s*(.*))?$/;
+    next unless $good;
+    $good = lc $good;
+    $self->log(LOGWARN, "Bad goodmailfrom config: No \@ sign in $good") and next
+      unless $good =~ m/\@/;
+    next unless ($good eq $from || $good eq "\@$host");
+    $transaction->notes('goodmailfrom', $reason || "goodmailfrom: $good";
+    last;
+  }
+  return (DECLINED);
+}

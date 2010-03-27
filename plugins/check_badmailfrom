@@ -17,14 +17,15 @@ listed in badmailfrom.  A line in badmailfrom may be of the form
 You may optionally include a message after the sender address (leave a space),
 which is used when rejecting the sender.
 
+Senders in the goodmailfrom list will be exempted from this check
+(useful if you have a domain wide badmailfrom with some good addresses).
+
 =head1 NOTES
 
 According to the SMTP protocol, we can't reject until after the RCPT
 stage, so store it until later.
 
 =cut
-
-# TODO: add the ability to provide a custom default rejection reason
 
 sub hook_mail {
   my ($self, $transaction, $sender, %param) = @_;
@@ -45,7 +46,7 @@ sub hook_mail {
     $bad = lc $bad;
     $self->log(LOGWARN, "Bad badmailfrom config: No \@ sign in $bad") and next unless $bad =~ m/\@/;
     $transaction->notes('badmailfrom', $reason)
-      if ($bad eq $from) || (substr($bad,0,1) eq '@' && $bad eq "\@$host");
+      if ($bad eq $from || $bad eq "\@$host");
   }
   return (DECLINED);
 }
@@ -53,7 +54,7 @@ sub hook_mail {
 sub hook_rcpt {
   my ($self, $transaction, $rcpt, %param) = @_;
   my $note = $transaction->notes('badmailfrom');
-  if ($note) {
+  if ($note && ! $transaction->notes('goodmailfrom')) {
     $self->log(LOGINFO, $note);
     return (DENY, $note);
   }

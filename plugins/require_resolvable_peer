@@ -1,0 +1,81 @@
+#!perl -w
+
+=head1 NAME
+
+require_resolvable_peer
+
+=head1 SYNOPSIS
+
+This plugin checks that the connecting host has some form of rDNS, and
+rejects mail from those that don't.
+
+Relayclients are of course excepted from this check.
+
+=head1 CONFIG
+
+The following parameters can be passed to require_resolvable_peer:
+
+=over 4
+
+=item disconnect
+
+Causes the plugin to disconnect after denying.
+
+=back
+
+
+=head1 TODO
+
+
+RCPT, or denyhard on RCPT.
+
+=head1 AUTHOR
+
+Copyright 2005 Nick Leverton <nick@leverton.org>
+
+This software is free software and may be distributed under the same
+terms as qpsmtpd itself.
+
+=cut
+
+
+my $VERSION = 0.01;
+
+use constant PLUGIN => '_require_resolvable_peer';
+
+sub register {
+  my ($self, $qp, $denial ) = @_;
+  if ( defined $denial and $denial =~ /^disconnect$/i ) {
+    $self->{PLUGIN}->{DENY} = DENYSOFT_DISCONNECT;
+  }
+  else {
+    $self->{PLUGIN}->{DENY} = DENYSOFT;
+  }
+
+}
+
+sub hook_connect {
+  my ($self, $transaction) = @_;
+  my $connection = $self->qp->connection;
+
+  return (DECLINED)
+    if $connection->relay_client or $connection->notes('whitelisthost');
+
+  # Check that they have an rDNS
+  $connection->notes(PLUGIN, "Rejecting mail from unresolvable host ".$connection->remote_ip)
+    unless $connection->remote_host && $connection->remote_host ne 'Unknown';
+
+  return (DECLINED);
+}
+
+sub hook_rcpt {
+  my ($self, $transaction, $recipient) = @_;
+  my $connection = $self->qp->connection;
+
+  if (my $msg = $connection->notes(PLUGIN)) {
+    $self->log(LOGNOTICE, $msg);
+    return ($self->{PLUGIN}->{DENY}, $msg);
+  }
+
+  return (DECLINED);
+}

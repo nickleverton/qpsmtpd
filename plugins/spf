@@ -1,0 +1,174 @@
+=head1 NAME
+
+SPF - plugin to implement Sender Permitted From using Mail::SPF
+
+=head1 SYNOPSIS
+
+This plugin is based on "sender_permitted_from", but it uses Mail::SPF instead 
+of Mail::SPF::Query because the latest roughly conforms to the final SPFv1 specification.
+Please see http://www.openspf.org/Implementations for more information.
+
+  # in config/plugins
+  spf
+
+Or if you wish to issue 5xx on SPF fail:
+
+  spf [spf_deny n] [Mail::SPF::Server constructor args]
+
+spf_deny 0 will not issue 5xx responses
+
+spf_deny 1 will issue 5xx response on SPF FAIL
+
+spf_deny 2 will issue 5xx response on SPF SOFTFAIL and FAIL
+
+Other arguments are valid Mail::SPF::Server arguments.
+
+  B<default_authority_explanation>
+  
+    Default: 'Please see http://www.openspf.org/Why?s=%{_scope}&id=%{S}&ip=%{C}&r=%{R}'
+    
+  B<hostname>
+  
+    A string denoting the local system's fully qualified host name that should be used for 
+    expanding the r macro in explanation strings. Defaults to the system's configured host name.
+    
+  B<dns_resolver>
+  
+    An optional DNS resolver object. If none is specified, a new Net::DNS::Resolver 
+    object is used. The resolver object may be of a different class, but it must 
+    provide an interface similar to Net::DNS::Resolver -- at least the send and 
+    errorstring methods must be supported, and the send method must return either 
+    an object of class Net::DNS::Packet, or, in the case of an error, undef.
+  
+  ... 
+  
+  See http://search.cpan.org/~jmehnle/Mail-SPF-v2.005/lib/Mail/SPF/Server.pm 
+  (or installed module version) for more information about parameters to the 
+  Mail::SPF::Server constructor.   
+
+See also http://www.openspf.org
+
+=head1 DEPENDENCIES
+
+You need B<Mail::SPF> perl module (available from CPAN) installed to use this module.
+Please see http://search.cpan.org/~jmehnle/Mail-SPF-v2.005/ (or desired version)
+
+=head1 AUTHORS
+
+	Original sender_permitted_from author
+	Sergi Pruneda <spruneda@capside.com>
+	Jose Luis Martinez <jlmartinez@capside.com>
+
+=cut
+
+use Mail::SPF;
+
+sub register {
+  my ($self, $qp, @args) = @_;
+  %{$self->{_args}} = @args;
+}
+
+sub hook_mail {
+  my ($self, $transaction, $sender, %param) = @_;
+
+  return (DECLINED) unless ($sender->format ne "<>"
+                            and $sender->host && $sender->user);
+
+  # If we are receving from a relay permitted host, then we are probably
+  # not the delivery system, and so we shouldn't check
+
+  return (DECLINED) if $self->qp->connection->relay_client();
+  my @relay_clients = $self->qp->config("relayclients");
+  my $more_relay_clients = $self->qp->config("morerelayclients", "map");
+  my %relay_clients = map { $_ => 1 } @relay_clients;
+  my $client_ip = $self->qp->connection->remote_ip;
+  while ($client_ip) {
+    return (DECLINED) if exists $relay_clients{$client_ip};
+    return (DECLINED) if exists $more_relay_clients->{$client_ip};
+    $client_ip =~ s/\d+\.?$//; # strip off another 8 bits
+  }
+
+  my $host = lc $sender->host;
+  my $from = $sender->user . '@' . $host;
+
+  my $ip = $self->qp->connection->remote_ip;
+  my $helo = $self->qp->connection->hello_host;
+
+  # We delete the plugin argument and use the rest for Mail::SPF::Server module
+  my %spf_args = %{$self->{_args}};
+  delete $spf_args{'spf_deny'};
+  # Create a Mail::SPF::Server object to process a new request
+  my $spf_server = Mail::SPF::Server->new(%spf_args);
+  my $request = Mail::SPF::Request->new( versions      => [1,2],
+                                         scope         => 'mfrom',
+                                         identity      => $from,
+                                         ip_address    => $ip,
+                                         helo_identity => $helo );
+
+  # Store Mail::SPF::Result in transaction notes
+  $transaction->notes('spfquery', $spf_server->process($request));
+               
+  return (DECLINED);
+}
+
+sub hook_rcpt {
+  my ($self, $transaction, $rcpt, %param) = @_;
+  
+  # special addresses don't get SPF-tested.
+  return DECLINED if $rcpt and $rcpt->user and $rcpt->user =~ /^(?:postmaster|abuse|mailer-daemon|root)$/i;
+  
+  my $query = $transaction->notes('spfquery');
+  return DECLINED if !$query;
+  
+  my $result = $query->code;
+  my $smtp_comment;
+  if($result eq 'fail') {
+    $smtp_comment = $query->authority_explanation;
+  } else {
+    $smtp_comment = $query->local_explanation;
+  }
+  my $comment = $query->local_explanation;
+  
+  if ($result eq "error") {
+    return (DENYSOFT, "SPF error: $smtp_comment");
+  }
+
+  if ($result eq "fail" and $self->{_args}{spf_deny}) {
+    return (DENY, "SPF forgery: $smtp_comment");
+  }
+
+  if ($result eq "softfail" and $self->{_args}{spf_deny} > 1) {
+    return (DENY, "SPF probable forgery: $smtp_comment");
+  }
+
+  if ($result eq 'fail' or $result eq 'softfail') {
+    # $self->log(LOGDEBUG, "result was $result: $comment");
+    $self->log(LOGNOTICE, "SPF result for $rcpt->address was $result: $comment");
+  }
+   
+  return DECLINED;
+}
+
+sub hook_data_post {
+  my ($self, $transaction) = @_;
+
+  my $query = $transaction->notes('spfquery');
+  return DECLINED if !$query;
+
+  my $result = $query->code;
+  my $smtp_comment;
+  if($result eq 'fail') {
+    $smtp_comment = $query->authority_explanation;
+  } else {
+    $smtp_comment = $query->local_explanation;
+  }
+  my $comment = $query->local_explanation;
+  my $spf_header = $query->received_spf_header;
+
+  $self->log(LOGINFO, "result was $result: $comment") if ($result);
+
+  $transaction->header->add('Received-SPF' => "$spf_header", 0);
+
+  return DECLINED;
+}
+
