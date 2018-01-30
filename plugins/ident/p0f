@@ -90,6 +90,12 @@ sub hook_connect {
       detail   => $detail,
       distance => $dist,
       link     => $link,
+      tos      => $tos,
+      fw       => $fw,
+      nat      => $nat,
+      real     => $real,
+      score    => $score,
+      mflags   => $mflags,
       uptime   => $uptime,
   };
 

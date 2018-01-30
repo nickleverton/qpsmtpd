@@ -36,7 +36,7 @@ sub hook_mail {
     $self->log(LOGWARN, "Bad goodmailfrom config: No \@ sign in $good") and next
       unless $good =~ m/\@/;
     next unless ($good eq $from || $good eq "\@$host");
-    $transaction->notes('goodmailfrom', $reason || "goodmailfrom: $good";
+    $transaction->notes('goodmailfrom', $reason || "goodmailfrom: $good");
     last;
   }
   return (DECLINED);

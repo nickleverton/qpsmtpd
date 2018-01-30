@@ -13,8 +13,7 @@ sub hook_connect {
   my $client_ip = $self->qp->connection->remote_ip;
   while ($client_ip) {
     if (exists($whitelist_hosts{$client_ip}) or
-        exists($more_whitelist_hosts->{$client_ip}) or
-        exists($more_whitelist_clients->{$client_ip}))
+        exists($more_whitelist_hosts->{$client_ip}))
     {
       $self->log(LOGNOTICE,"Host $client_ip is whitelisted");
       $self->qp->connection->notes('whitelisthost', 1);

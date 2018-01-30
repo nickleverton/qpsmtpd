@@ -66,6 +66,7 @@ use Mail::SPF;
 sub register {
   my ($self, $qp, @args) = @_;
   %{$self->{_args}} = @args;
+  $self->log(LOGINFO, "SPF deny=" . (exists $self->{_args}{'spf_deny'} ? $self->{_args}{'spf_deny'} : "undef") );
 }
 
 sub hook_mail {
@@ -78,6 +79,10 @@ sub hook_mail {
   # not the delivery system, and so we shouldn't check
 
   return (DECLINED) if $self->qp->connection->relay_client();
+
+  # skip a whitelisted host (lets us bypass problematic domains that don't resolve)
+  return (DECLINED) if $self->qp->connection->notes('whitelisthost');
+
   my @relay_clients = $self->qp->config("relayclients");
   my $more_relay_clients = $self->qp->config("morerelayclients", "map");
   my %relay_clients = map { $_ => 1 } @relay_clients;
@@ -113,7 +118,7 @@ sub hook_mail {
 
 sub hook_rcpt {
   my ($self, $transaction, $rcpt, %param) = @_;
-  
+
   # special addresses don't get SPF-tested.
   return DECLINED if $rcpt and $rcpt->user and $rcpt->user =~ /^(?:postmaster|abuse|mailer-daemon|root)$/i;
   
@@ -128,7 +133,7 @@ sub hook_rcpt {
     $smtp_comment = $query->local_explanation;
   }
   my $comment = $query->local_explanation;
-  
+
   if ($result eq "error") {
     return (DENYSOFT, "SPF error: $smtp_comment");
   }
@@ -143,7 +148,6 @@ sub hook_rcpt {
 
   if ($result eq 'fail' or $result eq 'softfail') {
     # $self->log(LOGDEBUG, "result was $result: $comment");
-    $self->log(LOGNOTICE, "SPF result for $rcpt->address was $result: $comment");
   }
    
   return DECLINED;
@@ -165,7 +169,7 @@ sub hook_data_post {
   my $comment = $query->local_explanation;
   my $spf_header = $query->received_spf_header;
 
-  $self->log(LOGINFO, "result was $result: $comment") if ($result);
+  $self->log(LOGINFO, "spf: result was $result: $comment") if ($result);
 
   $transaction->header->add('Received-SPF' => "$spf_header", 0);
 

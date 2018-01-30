@@ -21,17 +21,15 @@ The following parameters can be passed to require_resolvable_peer:
 
 Causes the plugin to disconnect after denying.
 
+=item allow
+
+Causes the plugin to allow the mail but to add a header which can be used for spam scoring.
+
 =back
-
-
-=head1 TODO
-
-
-RCPT, or denyhard on RCPT.
 
 =head1 AUTHOR
 
-Copyright 2005 Nick Leverton <nick@leverton.org>
+Copyright 2005,2012 Nick Leverton <nick@leverton.org>
 
 This software is free software and may be distributed under the same
 terms as qpsmtpd itself.
@@ -39,7 +37,7 @@ terms as qpsmtpd itself.
 =cut
 
 
-my $VERSION = 0.01;
+my $VERSION = 0.02;
 
 use constant PLUGIN => '_require_resolvable_peer';
 
@@ -47,6 +45,9 @@ sub register {
   my ($self, $qp, $denial ) = @_;
   if ( defined $denial and $denial =~ /^disconnect$/i ) {
     $self->{PLUGIN}->{DENY} = DENYSOFT_DISCONNECT;
+  }
+  elsif ( defined $denial and $denial =~ /^allow$/i ) {
+    $self->{PLUGIN}->{DENY} = DECLINED;
   }
   else {
     $self->{PLUGIN}->{DENY} = DENYSOFT;
@@ -62,7 +63,7 @@ sub hook_connect {
     if $connection->relay_client or $connection->notes('whitelisthost');
 
   # Check that they have an rDNS
-  $connection->notes(PLUGIN, "Rejecting mail from unresolvable host ".$connection->remote_ip)
+  $connection->notes(PLUGIN, "unresolvable host: ".$connection->remote_ip)
     unless $connection->remote_host && $connection->remote_host ne 'Unknown';
 
   return (DECLINED);
@@ -74,7 +75,18 @@ sub hook_rcpt {
 
   if (my $msg = $connection->notes(PLUGIN)) {
     $self->log(LOGNOTICE, $msg);
-    return ($self->{PLUGIN}->{DENY}, $msg);
+    return ($self->{PLUGIN}->{DENY}, "Rejecting mail from $msg");
+  }
+
+  return (DECLINED);
+}
+
+sub hook_data_post {
+  my ($self, $transaction) = @_;
+  my $connection = $self->qp->connection;
+
+  if (my $msg = $connection->notes(PLUGIN)) {
+    $transaction->header->add('X-Local-Spamcheck' => $msg);
   }
 
   return (DECLINED);
