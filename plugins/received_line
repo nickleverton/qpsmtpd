@@ -1,0 +1,22 @@
+
+use POSIX qw(strftime);
+
+# Fix Received line to be RFC5321 compatible for SpamAssassin
+
+sub hook_received_line {
+  my ($self, $transaction, $smtp, $authheader, $sslheader) = @_;
+
+  return (OK,
+      "from "
+    . $self->connection->remote_info
+    . " (HELO "
+    . $self->connection->hello_host . ") ("
+    . $self->connection->remote_ip
+    . ")\n by "
+    . $self->qp->config('me')
+    . " (qpsmtpd/"
+    . $self->qp->version
+    . ") with $smtp $sslheader; "
+    . (strftime('%a, %d %b %Y %H:%M:%S %z', localtime)) );
+
+}
