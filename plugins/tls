@@ -185,6 +185,7 @@ sub _convert_to_ssl {
             SSL_cipher_list => $self->tls_ciphers,
             SSL_server => 1,
             SSL_reuse_ctx => $self->ssl_context,
+	    Timeout => 30,
         ) or die "Could not create SSL socket: $!, SSL_ERROR=$SSL_ERROR";
     
         # Clone connection object (without data received from client)
@@ -295,6 +296,7 @@ sub upgrade_socket {
                 SSL_startHandshake => 0,
                 SSL_server => 1,
                 SSL_reuse_ctx => $self->{_stashed_plugin}->ssl_context,
+		Timeout => 30,
             } 
         ) or die "Could not upgrade socket to SSL: $!";
         $self->{_ssl_started} = 1;
