@@ -1,0 +1,54 @@
+#!/usr/bin/perl
+##########################################################################
+# qpsmtpd-LOG 0.0.1 2012-08-12 15:14:00 <nick@leverton.org> 
+##########################################################################
+
+#######################################################
+## Copyright (c) 2012 Nick Leverton <nick@leverton.org
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+########################################################
+
+use warnings;
+use strict;
+use POSIX;
+
+my $Debug  = $ENV{'LOGWATCH_DEBUG'} || 0;
+my $Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+my %Details;
+
+while (defined(my $ThisLine = <STDIN>)) {
+
+    $ThisLine =~ s/^(?:\w{3} )?\w{3} .\d \d\d:\d\d:\d\d\s+(?:[^\s]*\s+)//;
+    $ThisLine =~ s/^\s*[^:]*:\s+//;
+
+    print "-->".$ThisLine if $Debug >= 50;
+
+    next unless $ThisLine =~ /^LOG:/;
+
+    print "<--".$ThisLine if $Debug >= 10;
+
+    # $ip, $rdns, $helo, $from, $to, $filter, $failcode, $reason_or_msgid )
+    my @details = split /\t/, $ThisLine;
+    my ($filter, $failcode) = splice @details, 5, 2;
+
+    if ($filter eq "queued") {
+    	push @{$Details{accepted}}, [ undef, @details ];
+    } elsif ($failcode == 901) {
+    	push @{$Details{rejected}}, [ $filter, @details ];
+    } elsif ($failcode == 902) {
+    	push @{$Details{deferred}}, [ $filter, @details ];
+    } else {
+    	push @{$Details{unknown}}, [ $ThisLine ];
+    }
+
+}
+
+if ($Detail >= 5) {
+
+    foreach my $section (sort keys %Details) {
+    	printf "Mails %-10s  %8d\n", $section, scalar @{$Details{$section}};
+    }
+
+}
