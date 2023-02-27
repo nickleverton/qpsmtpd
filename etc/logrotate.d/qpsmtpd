@@ -1,0 +1,14 @@
+/var/log/qpsmtpd/*.log {
+	create 0640 qpsmtpd adm
+	missingok
+	monthly
+	rotate 14
+	compress
+	delaycompress
+	notifempty
+
+	postrotate
+		systemctl restart qpsmtpd
+	endscript
+}
+
