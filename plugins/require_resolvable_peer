@@ -29,7 +29,7 @@ Causes the plugin to allow the mail but to add a header which can be used for sp
 
 =head1 AUTHOR
 
-Copyright 2005,2012 Nick Leverton <nick@leverton.org>
+Copyright 2005,2012,2023 Nick Leverton <nick@leverton.org>
 
 This software is free software and may be distributed under the same
 terms as qpsmtpd itself.
@@ -37,7 +37,7 @@ terms as qpsmtpd itself.
 =cut
 
 
-my $VERSION = 0.02;
+my $VERSION = 0.03;
 
 use constant PLUGIN => '_require_resolvable_peer';
 
@@ -63,8 +63,9 @@ sub hook_connect {
     if $connection->relay_client or $connection->notes('whitelisthost');
 
   # Check that they have an rDNS
+  my $remote_host = $connection->remote_host();
   $connection->notes(PLUGIN, "unresolvable host: ".$connection->remote_ip)
-    unless $connection->remote_host && $connection->remote_host ne 'Unknown';
+    unless $remote_host && $remote_host ne 'Unknown';
 
   return (DECLINED);
 }
