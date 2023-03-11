@@ -17,13 +17,21 @@ The following parameters can be passed to require_resolvable_peer:
 
 =over 4
 
+=item allow
+
+Causes the plugin to allow the mail but to add a header which can be used for spam scoring.
+
 =item disconnect
 
 Causes the plugin to disconnect after denying.
 
-=item allow
+=item on_connect
 
-Causes the plugin to allow the mail but to add a header which can be used for spam scoring.
+As a second parameter following 'disconnect', causes the plugin to
+disconnect immediately upon connection rather than waiting until RCPT.
+
+This can reduce the number of hosts making AUTH attempts (which precedes
+RCPT) at the cost of not allowing genuine AUTH connections without rDNS.
 
 =back
 
@@ -37,12 +45,12 @@ terms as qpsmtpd itself.
 =cut
 
 
-my $VERSION = 0.03;
+my $VERSION = 0.04;
 
 use constant PLUGIN => '_require_resolvable_peer';
 
 sub register {
-  my ($self, $qp, $denial ) = @_;
+  my ($self, $qp, $denial, $on_connect ) = @_;
   if ( defined $denial and $denial =~ /^disconnect$/i ) {
     $self->{PLUGIN}->{DENY} = DENYSOFT_DISCONNECT;
   }
@@ -51,6 +59,9 @@ sub register {
   }
   else {
     $self->{PLUGIN}->{DENY} = DENYSOFT;
+  }
+  if (defined $on_connect && $on_connect =~ /on_connect/i) {
+    $self->{PLUGIN}->{ONCONNECT} = 1;
   }
 
 }
@@ -64,8 +75,15 @@ sub hook_connect {
 
   # Check that they have an rDNS
   my $remote_host = $connection->remote_host();
-  $connection->notes(PLUGIN, "unresolvable host: ".$connection->remote_ip)
-    unless $remote_host && $remote_host ne 'Unknown';
+  if ($remote_host && $remote_host eq 'Unknown')
+  {
+    my $msg = "unresolvable host: ".$connection->remote_ip;
+    if (exists $self->{PLUGIN}->{ONCONNECT} ) {
+      $self->log(LOGNOTICE, $msg);
+      return ($self->{PLUGIN}->{DENY}, "Rejecting connection from $msg");
+    }
+    $connection->notes(PLUGIN, $msg);
+  }
 
   return (DECLINED);
 }
