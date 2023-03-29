@@ -8,9 +8,9 @@ tls - plugin to support STARTTLS
 
 # in config/plugins
 
-tls [B<cert_path priv_key_path ca_path>]
+tls [B<cert_path priv_key_path ca_path dhparam_path>]
 
-=over indentlevel
+=over 5
 
 =item B<cert_path>
 
@@ -23,6 +23,11 @@ Path to the private key file. Default: I<ssl/qpsmtpd-server.key>
 =item B<ca_path>
 
 Path to the certificate authority file. Default: I<ssl/qpsmtpd-ca.crt>
+
+=item B<dhparam_path>
+
+Path to the DH parameter file if you want Diffie-Hellman key exchange.
+Default: I<ssl/qpsmtpd-dhparam.pem>
 
 =back
 
@@ -45,7 +50,7 @@ MAIL FROM onwards.
 
 Use the script C<plugins/tls_cert> to automatically generate a self-signed
 certificate with the appropriate characteristics.  Otherwise, you should
-give absolute pathnames to the certificate, key, and the CA root cert 
+give absolute pathnames to the certificate, key, and the CA root cert
 used to sign that certificate.
 
 =head1 CIPHERS and COMPATIBILITY
@@ -57,53 +62,79 @@ ciphers at L<http://www.openssl.org/docs/apps/ciphers.html#CIPHER_STRINGS>,
 and put a suitable string in config/tls_ciphers (e.g. "DEFAULT" or
 "HIGH:MEDIUM")
 
+=head1 SSL/TLS protocols versions
+
+By default, SSLv2 and SSLv3 are not accepted, leaving only TLSv1,
+TLSv1.1 or TLSv1.2 enabled. You can customize this in config/tls_protocols
+For example, this will also disabled TLSv1, leaving only TLSv1.1 and TLSv1.2
+
+SSLv23:!SSLv2:!SSLv3:!TLSv1
+
 =cut
 
-use IO::Socket::SSL 0.98; # qw(debug1 debug2 debug3 debug4);
+use strict;
+
+use IO::Socket::SSL 0.98;
+
+use Qpsmtpd::Constants;
 
 sub init {
-    my ($self, $qp, $cert, $key, $ca) = @_;
-    $cert ||= 'ssl/qpsmtpd-server.crt';
-    $key  ||= 'ssl/qpsmtpd-server.key';
-    $ca   ||= 'ssl/qpsmtpd-ca.crt';
-    unless ( -f $cert && -f $key && -f $ca ) {
-        $self->log(LOGERROR, "Cannot locate cert/key!  Run plugins/tls_cert to generate");
+    my ($self, $qp, $cert, $key, $ca, $dhparam) = @_;
+    my $dir = -d 'ssl' ? 'ssl' : 'config/ssl';
+    $cert ||= "$dir/qpsmtpd-server.crt";
+    $key  ||= "$dir/qpsmtpd-server.key";
+    $ca   ||= "$dir/qpsmtpd-ca.crt";
+    $dhparam ||= "$dir/qpsmtpd-dhparam.pem";
+    unless (-r $cert && -r $key && -r $ca) {
+        $self->log(LOGERROR,
+                   "Cannot locate cert/key!  Run plugins/tls_cert to generate");
         return;
+    }
+    unless (-f $dhparam && -s $dhparam) {
+        $dhparam = undef;
+        $self->log(LOGINFO,
+                   "dhparam is not exist or empty, possible DHE ciphers will be unavailable.");
+        $self->log(LOGINFO,
+                   "The encryption strength will decline due to lack of Forward Secrecy.");
     }
     $self->tls_cert($cert);
     $self->tls_key($key);
     $self->tls_ca($ca);
-    $self->tls_ciphers($self->qp->config('tls_ciphers') || 'HIGH:!SSLV2');
-    $self->tls_version($self->qp->config('tls_protocols') || 'SSLv23:!SSLv3:!SSLv2');
-    
-    $self->log(LOGINFO, "ciphers: ".$self->tls_ciphers);
+    $self->tls_dhparam($dhparam);
+    $self->tls_ciphers($self->qp->config('tls_ciphers') || 'HIGH');
+    $self->tls_protocols($self->qp->config('tls_protocols') || 'SSLv23:!SSLv2:!SSLv3');
 
-    local $^W; # this bit is very noisy...
-    my $ssl_ctx = IO::Socket::SSL::SSL_Context->new(
-        SSL_use_cert => 1,
-        SSL_cert_file => $self->tls_cert,
-        SSL_key_file => $self->tls_key,
-        SSL_ca_file => $self->tls_ca,
-        SSL_cipher_list => $self->tls_ciphers,
-        SSL_version => $self->tls_version,
-        SSL_server => 1
-    ) or die "Could not create SSL context: $!";
+    $self->log(LOGDEBUG, "ciphers: " . $self->tls_ciphers);
+
+    local $^W;    # this bit is very noisy...
+    my $ssl_ctx =
+      IO::Socket::SSL::SSL_Context->new(
+                                        SSL_version     => $self->tls_protocols,
+                                        SSL_use_cert    => 1,
+                                        SSL_cert_file   => $self->tls_cert,
+                                        SSL_key_file    => $self->tls_key,
+                                        SSL_ca_file     => $self->tls_ca,
+                                        SSL_dh_file     => $self->tls_dhparam,
+                                        SSL_cipher_list => $self->tls_ciphers,
+                                        SSL_server      => 1,
+                                        SSL_honor_cipher_order => 1
+                                       )
+      or die "Could not create SSL context: $!";
+
     # now extract the password...
-    
     $self->ssl_context($ssl_ctx);
-    
+
     # Check for possible AUTH mechanisms
-HOOK: foreach my $hook ( keys %{$qp->hooks} ) {
+    foreach my $hook (keys %{$qp->hooks}) {
         no strict 'refs';
-        if ( $hook =~ m/^auth-?(.+)?$/ ) {
-            if ( defined $1 ) {
-                my $hooksub = "hook_$hook";
-                $hooksub =~ s/\W/_/g;
-                *$hooksub = \&bad_ssl_hook;
-            }
-            else { # at least one polymorphous auth provider
-                *hook_auth = \&bad_ssl_hook;
-            }
+        next if $hook !~ m/^auth-?(.+)?$/;
+        if (defined $1) {
+            my $hooksub = "hook_$hook";
+            $hooksub =~ s/\W/_/g;
+            *$hooksub = \&bad_ssl_hook;
+        }
+        else {    # at least one polymorphous auth provider
+            *hook_auth = \&bad_ssl_hook;
         }
     }
 }
@@ -112,33 +143,33 @@ sub hook_ehlo {
     my ($self, $transaction) = @_;
     return DECLINED unless $self->can_do_tls;
     return DECLINED if $self->connection->notes('tls_enabled');
-    return DENY, "Command refused due to lack of security" if $transaction->notes('ssl_failed');
-    my $cap = $transaction->notes('capabilities');
-    $cap ||= [];
+    return DENY, "Command refused due to lack of security"
+      if $transaction->notes('ssl_failed');
+    my $cap = $transaction->notes('capabilities') || [];
     push @$cap, 'STARTTLS';
-    $transaction->notes('tls_enabled', 1);
+    $transaction->notes('tls_enabled',  1);
     $transaction->notes('capabilities', $cap);
     return DECLINED;
 }
 
 sub hook_unrecognized_command {
     my ($self, $transaction, $cmd, @args) = @_;
-    return DECLINED unless $cmd eq 'starttls';
+    return DECLINED unless lc $cmd eq 'starttls';
     return DECLINED unless $transaction->notes('tls_enabled');
-    return DENY, "Syntax error (no parameters allowed)" if @args;
-    
+    return DENY, 'Syntax error (no parameters allowed)' if @args;
+
     # OK, now we setup TLS
-    $self->qp->respond (220, "Go ahead with TLS");
-    
-    unless ( _convert_to_ssl($self) ) {
+    $self->qp->respond(220, "Go ahead with TLS");
+
+    unless (_convert_to_ssl($self)) {
+
         # SSL setup failed. Now we must respond to every command with 5XX
-        warn("TLS failed: $@\n");
-	$self->log(LOGERROR, "TLS failed: $@");
+        warn "TLS failed: $@\n";
         $transaction->notes('ssl_failed', 1);
-        return DENY, "TLS Negotiation Failed";
+        return DENY, 'TLS Negotiation Failed';
     }
-    
-    $self->log(LOGWARN, "TLS setup returning");
+
+    $self->log(LOGINFO, 'TLS setup returning');
     return DONE;
 }
 
@@ -146,12 +177,16 @@ sub hook_connect {
     my ($self, $transaction) = @_;
 
     my $local_port = $self->qp->connection->local_port;
-    return DECLINED unless $local_port == 465; # SMTPS
-    
-    unless ( _convert_to_ssl($self) ) {
-        return (DENY_DISCONNECT, "Cannot establish SSL session");
+    if ( ! defined $local_port || $local_port != 465 ) {  # SMTPS
+        $self->log(LOGDEBUG, "skip, not SMTPS");
+        return DECLINED;
+    };
+
+    unless (_convert_to_ssl($self)) {
+        $self->log(LOGINFO, "fail, unable to establish SSL");
+        return DENY_DISCONNECT, "Cannot establish SSL session";
     }
-    $self->log(LOGWARN, "Connected via SMTPS");
+    $self->log(LOGINFO, "pass, connect via SMTPS");
     return DECLINED;
 }
 
@@ -159,11 +194,12 @@ sub hook_post_connection {
     my ($self, $transaction) = @_;
 
     my $tls_socket = $self->connection->notes('tls_socket');
-    if (defined $tls_socket && $self->connection->notes('tls_socket_is_duped')) {
-        $tls_socket->close;
-        $self->connection->notes('tls_socket', undef);
-        $self->connection->notes('tls_socked_is_duped', 0);
-    }
+    return DECLINED if !defined $tls_socket;
+    return DECLINED if !$self->connection->notes('tls_socket_is_duped');
+
+    $tls_socket->close;
+    $self->connection->notes('tls_socket',          undef);
+    $self->connection->notes('tls_socked_is_duped', 0);
 
     return DECLINED;
 }
@@ -171,43 +207,34 @@ sub hook_post_connection {
 sub _convert_to_ssl {
     my ($self) = @_;
 
-    if ($self->qp->isa('Qpsmtpd::PollServer')) {
-        return _convert_to_ssl_async($self);
-    }
-
     eval {
-        my $tlssocket = IO::Socket::SSL->new_from_fd(
-            fileno(STDIN), '+>',
-            SSL_use_cert => 1,
-            SSL_cert_file => $self->tls_cert,
-            SSL_key_file => $self->tls_key,
-            SSL_ca_file => $self->tls_ca,
-            SSL_cipher_list => $self->tls_ciphers,
-            SSL_server => 1,
-            SSL_reuse_ctx => $self->ssl_context,
-	    Timeout => 30,
-        ) or die "Could not create SSL socket: $!, SSL_ERROR=$SSL_ERROR";
-    
+        my $tlssocket =
+          IO::Socket::SSL->new_from_fd(
+                                       fileno(STDIN), '+>',
+                                       SSL_version     => $self->tls_protocols,
+                                       SSL_use_cert    => 1,
+                                       SSL_cert_file   => $self->tls_cert,
+                                       SSL_key_file    => $self->tls_key,
+                                       SSL_ca_file     => $self->tls_ca,
+                                       SSL_dh_file     => $self->tls_dhparam,
+                                       SSL_cipher_list => $self->tls_ciphers,
+                                       SSL_server      => 1,
+                                       SSL_reuse_ctx   => $self->ssl_context,
+				       Timeout => 30,
+                                       SSL_honor_cipher_order => 1
+                                      )
+          or die "Could not create SSL socket: $!";
+
         # Clone connection object (without data received from client)
         $self->qp->connection($self->connection->clone());
         $self->qp->reset_transaction;
         *STDIN = *STDOUT = $self->connection->notes('tls_socket', $tlssocket);
         $self->connection->notes('tls_socket_is_duped', 1);
-        $self->connection->notes('tls_enabled', 1);
+        $self->connection->notes('tls_enabled',         1);
     };
     if ($@) {
         return 0;
     }
-    else {
-        return 1;
-    }
-}
-
-sub _convert_to_ssl_async {
-    my ($self) = @_;
-    my $upgrader = $self->connection
-                        ->notes( 'tls_upgrader', UpgradeClientSSL->new($self) );
-    $upgrader->upgrade_socket();
     return 1;
 }
 
@@ -234,16 +261,22 @@ sub tls_ca {
     $self->{_tls_ca};
 }
 
+sub tls_dhparam {
+    my $self = shift;
+    @_ and $self->{_tls_dhparam} = shift;
+    $self->{_tls_dhparam};
+}
+
 sub tls_ciphers {
     my $self = shift;
     @_ and $self->{_tls_ciphers} = shift;
     $self->{_tls_ciphers};
 }
 
-sub tls_version {
+sub tls_protocols {
     my $self = shift;
-    @_ and $self->{_tls_version} = shift;
-    $self->{_tls_version};
+    @_ and $self->{_tls_protocols} = shift;
+    $self->{_tls_protocols};
 }
 
 sub ssl_context {
@@ -255,7 +288,8 @@ sub ssl_context {
 # Fulfill RFC 2487 secn 5.1
 sub bad_ssl_hook {
     my ($self, $transaction) = @_;
-    return DENY, "Command refused due to lack of security" if $transaction->notes('ssl_failed');
+    return DENY, "Command refused due to lack of security"
+      if $transaction->notes('ssl_failed');
     return DECLINED;
 }
 *hook_helo = *hook_data = *hook_rcpt = *hook_mail = \&bad_ssl_hook;
@@ -263,10 +297,9 @@ sub bad_ssl_hook {
 package UpgradeClientSSL;
 
 # borrowed heavily from Perlbal::SocketSSL
-
 use strict;
 use warnings;
-no  warnings qw(deprecated);
+no warnings 'deprecated';
 
 use IO::Socket::SSL 0.98;
 use Errno qw( EAGAIN );
@@ -277,47 +310,52 @@ sub new {
     my UpgradeClientSSL $self = shift;
     $self = fields::new($self) unless ref $self;
     $self->{_stashed_plugin} = shift;
-    $self->{_stashed_qp} = $self->{_stashed_plugin}->qp;
+    $self->{_stashed_qp}     = $self->{_stashed_plugin}->qp;
     return $self;
 }
 
 sub upgrade_socket {
     my UpgradeClientSSL $self = shift;
 
-    unless ( $self->{_ssl_started} ) {
-        IO::Socket::SSL->start_SSL(
-            $self->{_stashed_qp}->{sock}, {
-                SSL_use_cert => 1,
-                SSL_cert_file => $self->{_stashed_plugin}->tls_cert,
-                SSL_key_file => $self->{_stashed_plugin}->tls_key,
-                SSL_ca_file => $self->{_stashed_plugin}->tls_ca,
-                SSL_cipher_list => $self->{_stashed_plugin}->tls_ciphers,
-                SSL_version => $self->{_stashed_plugin}->tls_version,
-                SSL_startHandshake => 0,
-                SSL_server => 1,
-                SSL_reuse_ctx => $self->{_stashed_plugin}->ssl_context,
-		Timeout => 30,
-            } 
-        ) or die "Could not upgrade socket to SSL: $!";
-        $self->{_ssl_started} = 1;
+    if (!$self->{_ssl_started}) {
+        $self->event_read($self->{_stashed_qp});
+        return;
     }
-    
-    $self->event_read($self->{_stashed_qp});
+
+    $self->{_stashed_qp}->clear_data();
+    my $sp = $self->{_stashed_plugin};
+    IO::Socket::SSL->start_SSL(
+                $self->{_stashed_qp}->{sock}, {
+                SSL_use_cert    => 1,
+                SSL_cert_file   => $sp->tls_cert,
+                SSL_key_file    => $sp->tls_key,
+                SSL_ca_file     => $sp->tls_ca,
+                SSL_dh_file     => $sp->tls_dhparam,
+                SSL_cipher_list => $sp->tls_ciphers,
+                SSL_startHandshake => 0,
+                SSL_server         => 1,
+                SSL_reuse_ctx   => $sp->ssl_context,
+	        Timeout => 30,
+                SSL_honor_cipher_order => 1
+            }
+        )
+        or die "Could not upgrade socket to SSL: $!";
+    $self->{_ssl_started} = 1;
 }
 
 sub event_read {
     my UpgradeClientSSL $self = shift;
     my $qp = shift;
-    
-    $qp->watch_read( 0 );
+
+    $qp->watch_read(0);
 
     my $sock = $qp->{sock}->accept_SSL;
 
     if (defined $sock) {
-        $qp->connection( $qp->connection->clone );
+        $qp->connection($qp->connection->clone);
         $qp->reset_transaction;
-        $qp->connection->notes('tls_socket', $sock);
-        $qp->connection->notes('tls_enabled', 1);
+        $self->connection->notes('tls_socket',  $sock);
+        $self->connection->notes('tls_enabled', 1);
         $qp->watch_read(1);
         return 1;
     }
@@ -327,14 +365,15 @@ sub event_read {
         $qp->set_reader_object($self);
         if ($SSL_ERROR == SSL_WANT_READ) {
             $qp->watch_read(1);
-        } elsif ($SSL_ERROR == SSL_WANT_WRITE) {
+        }
+        elsif ($SSL_ERROR == SSL_WANT_WRITE) {
             $qp->watch_write(1);
-        } else {
+        }
+        else {
             $qp->disconnect();
         }
-    } else {
+    }
+    else {
         $qp->disconnect();
     }
 }
-
-1;
