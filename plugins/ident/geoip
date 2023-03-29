@@ -175,22 +175,23 @@ sub load_geoip1 {
 sub load_geoip2 {
     my $self = shift;
 
+    my @dbs;
+
     eval 'use GeoIP2::Database::Reader';
     if ($@) {
         $self->log(LOGERROR, "could not load GeoIP2");
         return;
     }
 
-    warn "Using GeoIP2."
-       . " ASN data is not currently available using the GeoIP2 module!\n";
-
     eval {
         $self->{_geoip2_city} = GeoIP2::Database::Reader->new(
-            file => $self->{_args}{db_dir} . '/GeoLite2-City.mmdb',
+            file => $self->{_args}{db_dir} . '/geoLite2-City.mmdb',
         );
     };
     if ($@) {
         $self->log(LOGERROR, "unable to load GeoLite2-City.mmdb");
+    } else {
+      push @dbs, "GeoLite2-City";
     }
 
     eval {
@@ -200,10 +201,25 @@ sub load_geoip2 {
     };
     if ($@) {
         $self->log(LOGERROR, "unable to load GeoLite2-Country.mmdb");
+    } else {
+      push @dbs, "GeoLite2-Country";
     }
 
-    if ($self->{_geoip2_city} || $self->{_geoip2_country}) {
+    eval {
+        $self->{_geoip2_asn} = GeoIP2::Database::Reader->new(
+            file => $self->{_args}{db_dir} . '/GeoLite2-ASN.mmdb',
+        );
+    };
+    if ($@) {
+        $self->log(LOGERROR, "unable to load GeoLite2-ASN.mmdb");
+    } else {
+      push @dbs, "GeoLite2-ASN";
+    }
+
+
+    if ($self->{_geoip2_city} || $self->{_geoip2_country} || $self->{_geoip2_asn}) {
         $self->register_hook('connect', 'geoip2_lookup');
+        $self->log(LOGINFO, "GeoIP loaded ".join(", ", @dbs));
         return 1;
     }
 
@@ -248,6 +264,15 @@ sub geoip2_lookup {
         };
     }
 
+    if ($self->{_geoip2_asn}) {
+        my $asn_rec = $self->{_geoip2_asn}->asn(ip => $ip);
+        if ($asn_rec) {
+            $self->qp->connection->notes('geoip_asn', $asn_rec->autonomous_system_number());
+            $self->qp->connection->notes('geoip_asn_name', $asn_rec->autonomous_system_organization());
+            $self->qp->connection->notes('geoip_network', $asn_rec->network());
+        };
+    }
+
     return DECLINED;
 }
 
@@ -289,7 +314,15 @@ sub geoip_lookup {
             $self->adjust_karma(-1);
         }
     }
-    $self->log(LOGINFO, join(", ", @msg_parts));
+
+    my $asn = $self->qp->connection->notes('geoip_asn');
+    if (defined $asn) {
+        my $net = $self->qp->connection->notes('geoip_network');
+        push( @msg_parts, "ASN:$asn");
+        push( @msg_parts, "Net:$net") if defined $net;
+    }
+
+    $self->log(LOGINFO, "geoip: " . join(", ", @msg_parts));
 
     return DECLINED;
 }
