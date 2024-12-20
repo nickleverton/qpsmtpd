@@ -72,7 +72,7 @@ Written by Charles Butcher who took a lot from logging/adaptive by John Peacock.
 
 =head1 VERSION
 
-This is release 1.2~njl
+This is release 1.3~njl
 
 =cut
 
@@ -150,13 +150,14 @@ sub _log_terse {
   
     my $remote_ip   = $self->qp->connection->remote_ip()   || '';
     my $remote_host = $self->qp->connection->remote_host() || '';
+    my $local_port  = $self->qp->connection->local_port()  || '';
     my $hello_host  = $self->qp->connection->hello_host()  || '';
     my $tx_sender   = $transaction->sender()               || '';
  
     my @log_message;
 
     push(@log_message,
-	   $remote_ip,
+	   $remote_ip . ($local_port == 25 ? "" : ",$local_port"),
 	   $remote_host,
 	   $hello_host,
 	   $tx_sender,
