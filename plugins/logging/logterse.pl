@@ -35,6 +35,8 @@ colon-separated fields as follows:
 
 =item 8. the DENY message, or the message-id if it was queued.
 
+=item 9. the encryption cypher, if any
+
 =back
 
 As with logging/adaptive, a distinctive prefix (the backquote character by default) is
@@ -70,7 +72,7 @@ Written by Charles Butcher who took a lot from logging/adaptive by John Peacock.
 
 =head1 VERSION
 
-This is release 1.0
+This is release 1.1~njl
 
 =cut
 
@@ -153,6 +155,8 @@ sub _log_terse {
     map {s/$FS/_/g} @log_message;
 
     push(@log_message, $disposition);
+
+    push(@log_message, $self->connection->notes('tls_enabled') ? $self->connection->notes('tls_socket')->get_cipher() : "");
 	
     $self->log($self->{_loglevel}, $self->{_prefix}, join($FS, @log_message));
 }
