@@ -72,7 +72,7 @@ Written by Charles Butcher who took a lot from logging/adaptive by John Peacock.
 
 =head1 VERSION
 
-This is release 1.1~njl
+This is release 1.2~njl
 
 =cut
 
@@ -103,6 +103,16 @@ sub register {
     }
 }
 
+sub hook_rcpt_post {
+    my ($self, $transaction, $rcpt, $rc, $msg) = @_;
+    $self->log(LOGDEBUG, "rcpt_post: rcpt " . $rcpt . " $rc (" . (join(":",@$msg)) . ")");
+    return DECLINED if $rc == OK || $rc == DONE;	# can we even get DECLINED here ?
+
+    my $rcpt_denied = $transaction->notes('rcpt_denied') || [ ];
+    push @$rcpt_denied, join(" ", @$msg, $rcpt);
+    $self->connection->notes('rcpt_denied',  $rcpt_denied);
+    return DECLINED;
+}
 
 sub hook_deny {
     my ( $self, $transaction, $prev_hook, $retval, $return_text ) = @_;
@@ -133,6 +143,10 @@ sub _log_terse {
     my ( $self, $transaction, $disposition ) = @_;
 
     my $recipients = join(',', $transaction->recipients);
+    if ($transaction->notes('rcpt_denied')) {
+	my $rcpt_denied = "Denied: ". join(",",@{$transaction->notes('rcpt_denied')}) . ";" ;
+	$recipients = join(",", $recipients, $rcpt_denied);
+    }
   
     my $remote_ip   = $self->qp->connection->remote_ip()   || '';
     my $remote_host = $self->qp->connection->remote_host() || '';
