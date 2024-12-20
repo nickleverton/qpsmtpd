@@ -55,14 +55,20 @@ sub conn_info_inetd {
         " $0 must be called from tcpserver, (x)inetd or" .
         " a similar program which passes a socket to stdin";
 
+    my $oursockaddr = getsockname(STDIN) or die "getsockname failed";
+
     my ($r_port, $iaddr) = sockaddr_in($hersockaddr);
     my $r_ip = inet_ntoa($iaddr);
     my ($r_host) = $base->resolve_ptr($r_ip) || "[$r_ip]";
 
+    my ($l_port, $laddr) = sockaddr_in($oursockaddr);
+    my $l_ip = inet_ntoa($laddr);
+    my ($l_host) = $base->resolve_ptr($l_ip) || "[$l_ip]";
+
     return (
-        local_ip    => '',
-        local_host  => '',
-        local_port  => '',
+        local_ip    => $l_ip,
+        local_host  => $l_host,
+        local_port  => $l_port,
         remote_ip   => $r_ip,
         remote_host => $r_host,
         remote_info => $r_host,
@@ -80,7 +86,7 @@ sub start_connection {
     else {
         %info = $self->conn_info_inetd();
     }
-    $self->log(LOGNOTICE, "Connection from $info{remote_info} [$info{remote_ip}]");
+    $self->log(LOGNOTICE, "Connection from $info{remote_info} [$info{remote_ip}] on $info{local_ip}:$info{local_port}  ");
 
     # if the local dns resolver doesn't filter it out we might get
     # ansi escape characters that could make a ps axw do "funny"
