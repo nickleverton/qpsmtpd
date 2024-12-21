@@ -72,7 +72,7 @@ Written by Charles Butcher who took a lot from logging/adaptive by John Peacock.
 
 =head1 VERSION
 
-This is release 1.3~njl
+This is release 1.4~njl
 
 =cut
 
@@ -171,7 +171,11 @@ sub _log_terse {
 
     push(@log_message, $disposition);
 
-    push(@log_message, $self->connection->notes('tls_enabled') ? $self->connection->notes('tls_socket')->get_cipher() : "");
+    if ( $self->connection->notes('tls_enabled') ) {
+	    push(@log_message, $self->connection->notes('tls_socket')->get_sslversion() . ":" . $self->connection->notes('tls_socket')->get_cipher() );
+    } else {
+	    push(@log_message, "");
+    }
 	
     $self->log($self->{_loglevel}, $self->{_prefix}, join($FS, @log_message));
 }
