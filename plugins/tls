@@ -101,10 +101,11 @@ sub init {
     $self->tls_key($key);
     $self->tls_ca($ca);
     $self->tls_dhparam($dhparam);
-    $self->tls_ciphers($self->qp->config('tls_ciphers') || 'HIGH');
-    $self->tls_protocols($self->qp->config('tls_protocols') || 'SSLv23:!SSLv2:!SSLv3');
+    $self->tls_ciphers($self->qp->config('tls_ciphers'));
+    $self->tls_protocols($self->qp->config('tls_protocols'));
 
-    $self->log(LOGDEBUG, "ciphers: " . $self->tls_ciphers);
+    $self->log(LOGDEBUG, "protocols: " . $self->tls_protocols) if $self->tls_protocols;
+    $self->log(LOGDEBUG, "ciphers: " . $self->tls_ciphers) if $self->tls_ciphers;
 
     local $^W;    # this bit is very noisy...
     my $ssl_ctx =
@@ -225,6 +226,8 @@ sub _convert_to_ssl {
                                       )
           or die "Could not create SSL socket: $!";
 
+        $self->log(LOGDEBUG, "SSL established with ".$tlssocket->get_sslversion()." cipher ".$tlssocket->get_cipher());
+
         # Clone connection object (without data received from client)
         $self->qp->connection($self->connection->clone());
         $self->qp->reset_transaction;
@@ -304,6 +307,8 @@ no warnings 'deprecated';
 use IO::Socket::SSL 0.98;
 use Errno qw( EAGAIN );
 
+use Qpsmtpd::Constants;       # for debug, if nothing else
+
 use fields qw( _stashed_qp _stashed_plugin _ssl_started );
 
 sub new {
@@ -340,6 +345,9 @@ sub upgrade_socket {
             }
         )
         or die "Could not upgrade socket to SSL: $!";
+
+    $self->{_stashed_qp}->log(LOGDEBUG, "SSL upgraded with ".$self->{_stashed_qp}->{sock}->get_sslversion()." cipher ".$self->{_stashed_qp}->{sock}->get_cipher());
+
     $self->{_ssl_started} = 1;
 }
 
