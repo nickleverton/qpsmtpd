@@ -731,6 +731,7 @@ sub qpsmtpd_session {
     # set enviroment variables
     ($ENV{TCPLOCALIP}, $ENV{TCPREMOTEIP}, $ENV{TCPREMOTEHOST}) =
       $qpsmtpd->tcpenv($nto_laddr, $nto_iaddr);
+    ($ENV{TCPLOCALPORT}, $ENV{TCPREMOTEPORT}) = ($lport, $client->peerport);
 
     # run qpmsptd functions
     $SIG{__DIE__} = 'DEFAULT';

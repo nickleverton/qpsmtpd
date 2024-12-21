@@ -303,6 +303,7 @@ while (1) {
         # set enviroment variables
         ($ENV{TCPLOCALIP}, $ENV{TCPREMOTEIP}, $ENV{TCPREMOTEHOST}) =
           $qpsmtpd->tcpenv($nto_laddr, $nto_iaddr);
+        ($ENV{TCPLOCALPORT}, $ENV{TCPREMOTEPORT}) = ($lport, $port);
 
         # don't do this!
         #$0 = "qpsmtpd-forkserver: $ENV{TCPREMOTEIP} / $ENV{TCPREMOTEHOST}";
