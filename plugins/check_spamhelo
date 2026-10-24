@@ -22,7 +22,7 @@ sub hook_helo {
 
   # Some stupid MUA's (hello, Outlook) will HELO with the domain of
   # the user's address.  If such a client is validly relaying, allow it.
-  return DECLINED if $self->qp->connection->relay_client();
+  return DECLINED if $self->is_immune();
 
   for my $bad ($self->qp->config('badhelo')) {
     if ($host eq lc $bad) {

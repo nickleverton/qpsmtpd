@@ -71,7 +71,7 @@ sub hook_connect {
   my $connection = $self->qp->connection;
 
   return (DECLINED)
-    if $connection->relay_client or $connection->notes('whitelisthost');
+    if $self->is_immune();
 
   # Check that they have an rDNS
   my $remote_host = $connection->remote_host();

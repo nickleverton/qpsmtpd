@@ -80,7 +80,7 @@ sub register {
 sub hook_rcpt {
   my ($self, $transaction, $recipient) = @_;
 
-  return (DECLINED) if $self->qp->connection->relay_client;
+  return (DECLINED) if $self->is_immune();
 
   my @goodrcptto = $self->qp->config("goodrcptto") or return (DECLINED);
 
