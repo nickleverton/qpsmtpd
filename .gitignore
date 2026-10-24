@@ -1,3 +1,4 @@
 *.dpkg-*
 *.sav
 .*.sw?
+/etc/rc?.d
